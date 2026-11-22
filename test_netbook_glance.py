@@ -1,7 +1,8 @@
 import importlib.machinery
 import importlib.util
+import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 loader = importlib.machinery.SourceFileLoader('glance', './netbook-glance')
 spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -31,11 +32,20 @@ class CollectorTests(unittest.TestCase):
 
     def test_wifi_escaped_network_and_disconnected(self):
         with patch.object(glance, 'command', return_value='*:home\\:wifi:78\n'):
-            self.assertEqual(glance.wifi(), ('home:wifi', 78))
+            self.assertEqual(glance.wifi(), (True, 'home:wifi', 78))
+        with patch.object(glance, 'command', return_value='*:disconnected:80\n'):
+            self.assertEqual(glance.wifi(), (True, 'disconnected', 80))
         with patch.object(glance, 'command', return_value=''):
-            self.assertEqual(glance.wifi(), ('disconnected', None))
+            self.assertEqual(glance.wifi(), (False, None, None))
         with patch.object(glance, 'command', return_value=None):
             self.assertIsNone(glance.wifi())
+
+    def test_system_command_failures_and_timeout(self):
+        for failure in (FileNotFoundError(), subprocess.TimeoutExpired('nmcli', 3)):
+            with patch.object(glance.subprocess, 'run', side_effect=failure):
+                self.assertIsNone(glance.command('nmcli'))
+        with patch.object(glance.subprocess, 'run', return_value=Mock(returncode=1, stdout='error')):
+            self.assertIsNone(glance.command('nmcli'))
 
     def test_battery_skips_peripheral(self):
         outputs = ['/mouse_battery\n/laptop_battery\n',
@@ -59,7 +69,7 @@ class CollectorTests(unittest.TestCase):
 
     def test_wide_columns_and_controls(self):
         data = {'cpu': [('0', 4), ('1', 12)], 'memory': 62, 'swap': 26,
-                'battery': (38, 'discharging', '3 hours'), 'wifi': ('Home', 68),
+                'battery': (38, 'discharging', '3 hours'), 'wifi': (True, 'Home', 68),
                 'disk': (73, 3.5 * 1024**3), 'refreshed': 0}
         text = [''.join(part for part, _ in line) for line in glance.lines_for(data, 80)]
         battery = next(line for line in text if line.startswith('Battery'))
@@ -79,14 +89,17 @@ class CollectorTests(unittest.TestCase):
 
     def test_disconnected_wifi_is_red(self):
         data = {'cpu': [], 'memory': None, 'swap': None, 'battery': None,
-                'wifi': ('disconnected', None), 'disk': None, 'refreshed': 0}
+                'wifi': (False, None, None), 'disk': None, 'refreshed': 0}
         rows = glance.lines_for(data, 80)
         wifi = next(row for row in rows if row and row[0][0].startswith('Wi-Fi'))
         self.assertIn(('disconnected', 3), wifi)
+        data['wifi'] = (True, 'disconnected', 80)
+        wifi = next(row for row in glance.lines_for(data, 80) if row and row[0][0].startswith('Wi-Fi'))
+        self.assertTrue(any('connected' in part and color == 1 for part, color in wifi))
 
     def test_priority_and_signal_bar(self):
         data = {'cpu': [('0', 20)], 'memory': 40, 'swap': 0,
-                'battery': (10, 'discharging', '1 hour'), 'wifi': ('Home', 80),
+                'battery': (10, 'discharging', '1 hour'), 'wifi': (True, 'Home', 80),
                 'disk': (75, 1024**3), 'refreshed': 0}
         lines = glance.lines_for(data, 35)
         text = [''.join(part for part, _ in line) for line in lines]
@@ -97,6 +110,16 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(glance.metric_color(80, True), 1)
         self.assertEqual(glance.metric_color(90), 3)
         self.assertTrue(any('1.0 GiB free' in line for line in text))
+
+    def test_short_screen_indicates_hidden_content(self):
+        data = {'cpu': [('0', 20)], 'memory': 40, 'swap': 0,
+                'battery': (10, 'discharging', '1 hour'), 'wifi': (True, 'Home', 80),
+                'disk': (75, 1024**3), 'refreshed': 0}
+        screen = Mock()
+        screen.getmaxyx.return_value = (8, 40)
+        with patch.object(glance.curses, 'has_colors', return_value=False):
+            glance.draw(screen, data)
+        screen.addnstr.assert_any_call(7, 0, 'More below: enlarge terminal', 39)
 
     def test_refresh_age(self):
         self.assertEqual(glance.age_text(59), '59s')

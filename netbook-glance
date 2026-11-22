@@ -2,7 +2,6 @@
 """A small, manually refreshed Linux laptop dashboard."""
 import curses
 import datetime
-import os
 import shutil
 import socket
 import subprocess
@@ -11,6 +10,7 @@ import textwrap
 
 
 def read_cpu():
+    """Read total and idle counters for each logical CPU from Linux procfs."""
     counters = {}
     with open('/proc/stat', encoding='utf-8') as source:
         for line in source:
@@ -18,11 +18,13 @@ def read_cpu():
             if fields and fields[0].startswith('cpu') and fields[0][3:].isdigit():
                 values = [int(n) for n in fields[1:9]]
                 if len(values) >= 4:
-                    counters[fields[0][3:]] = (sum(values), values[3] + (values[4] if len(values) > 4 else 0))
+                    idle = values[3] + (values[4] if len(values) > 4 else 0)
+                    counters[fields[0][3:]] = (sum(values), idle)
     return counters
 
 
 def cpu_percent(before, after):
+    """Return per-core utilization from two counter snapshots."""
     result = []
     for core in sorted(after, key=int):
         if core not in before:
@@ -30,11 +32,13 @@ def cpu_percent(before, after):
             continue
         total = after[core][0] - before[core][0]
         idle = after[core][1] - before[core][1]
-        result.append((core, max(0, min(100, 100 * (total - idle) / total)) if total > 0 and idle >= 0 else None))
+        value = max(0, min(100, 100 * (total - idle) / total)) if total > 0 and idle >= 0 else None
+        result.append((core, value))
     return result
 
 
 def memory_values(text):
+    """Return memory and swap usage percentages, or None when unavailable."""
     values = {}
     for line in text.splitlines():
         key, sep, rest = line.partition(':')
@@ -53,6 +57,7 @@ def memory_values(text):
 
 
 def command(*args):
+    """Run a system tool with a short timeout; return None on failure."""
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=3, check=False)
         return result.stdout if result.returncode == 0 else None
@@ -61,6 +66,7 @@ def command(*args):
 
 
 def battery():
+    """Return (percentage, state, estimate) for a system battery, if found."""
     devices = command('upower', '-e')
     if devices is None:
         return None
@@ -71,7 +77,9 @@ def battery():
         if not info:
             continue
         fields = dict(line.strip().split(':', 1) for line in info.splitlines() if ':' in line)
-        if fields.get('type', 'battery').strip().lower() != 'battery' or fields.get('power supply', '').strip().lower() != 'yes':
+        battery_type = fields.get('type', 'battery').strip().lower()
+        power_supply = fields.get('power supply', '').strip().lower()
+        if battery_type != 'battery' or power_supply != 'yes':
             continue
         if fields.get('present', '').strip().lower() == 'no':
             continue
@@ -104,7 +112,9 @@ def split_nmcli(line):
 
 
 def wifi():
-    output = command('nmcli', '-t', '--escape', 'yes', '-f', 'IN-USE,SSID,SIGNAL', 'device', 'wifi', 'list', '--rescan', 'no')
+    """Return (connected, SSID, signal), or None when NetworkManager fails."""
+    output = command('nmcli', '-t', '--escape', 'yes', '-f',
+                     'IN-USE,SSID,SIGNAL', 'device', 'wifi', 'list', '--rescan', 'no')
     if output is None:
         return None
     for line in output.splitlines():
@@ -114,11 +124,12 @@ def wifi():
                 signal = int(fields[2])
             except ValueError:
                 signal = None
-            return fields[1] or '(hidden network)', signal
-    return ('disconnected', None)
+            return True, fields[1] or '(hidden network)', signal
+    return False, None, None
 
 
 def collect(on_cpu=None):
+    """Collect a snapshot, optionally reporting CPU before slower collectors."""
     try:
         first = read_cpu()
         time.sleep(0.5)
@@ -134,7 +145,8 @@ def collect(on_cpu=None):
         memory, swap = None, None
     try:
         disk = shutil.disk_usage('/')
-        disk_data = (100 * disk.used / (disk.used + disk.free), disk.free) if disk.used + disk.free else None
+        usable = disk.used + disk.free
+        disk_data = (100 * disk.used / usable, disk.free) if usable else None
     except OSError:
         disk_data = None
     battery_data, wifi_data = battery(), wifi()
@@ -198,7 +210,7 @@ def battery_status_color(state, value):
 
 
 def lines_for(data, width):
-    # Each line is a list of (text, color-pair) spans.
+    """Build lines of (text, color-pair) spans for the terminal width."""
     lines = header(data, width) + [[]]
     wide = width >= 53
     def text_line(text):
@@ -232,8 +244,8 @@ def lines_for(data, width):
         text_line('Battery  unavailable')
     lines.append([])
     if data['wifi']:
-        name, signal = data['wifi']
-        if name == 'disconnected':
+        connected, name, signal = data['wifi']
+        if not connected:
             lines.append([('Wi-Fi    ', 0), ('disconnected', 3)])
         else:
             metric('Wi-Fi', 'connected', signal, name, True, 1)
@@ -261,9 +273,14 @@ def lines_for(data, width):
 
 
 def draw(screen, data):
+    """Draw the snapshot; indicate when the terminal is too short."""
     screen.erase()
     height, width = screen.getmaxyx()
-    for row, spans in enumerate(lines_for(data, width)):
+    lines = lines_for(data, width)
+    truncated = len(lines) > height
+    for row, spans in enumerate(lines):
+        if truncated and row == height - 1:
+            break
         if row >= height:
             break
         col = 0
@@ -278,6 +295,11 @@ def draw(screen, data):
             except curses.error:
                 pass
             col += len(text)
+    if truncated and height > 0 and width > 1:
+        try:
+            screen.addnstr(height - 1, 0, 'More below: enlarge terminal', width - 1)
+        except curses.error:
+            pass
     screen.refresh()
 
 
