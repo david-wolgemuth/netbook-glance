@@ -1,5 +1,7 @@
 # netbook-glance
 
+![Netbook Glance dashboard showing battery, Wi-Fi, CPU, memory, and disk status](screenshot.png)
+
 A small, keyboard-driven terminal dashboard for answering “what's going on?” on
 a resource-constrained laptop or netbook. Its first target is **flyer4**, a
 Linux Mint 22 Cinnamon laptop with a Celeron N2930, 4 GB RAM, and about 14 GB
