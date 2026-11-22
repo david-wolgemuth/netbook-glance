@@ -33,6 +33,11 @@ class CollectorTests(unittest.TestCase):
         with patch.object(glance, 'command', side_effect=outputs):
             self.assertEqual(glance.battery(), (72, 'discharging', '3.2 hours'))
 
+    def test_battery_without_type_field(self):
+        info = '  power supply: yes\n  battery\n    present: yes\n    state: discharging\n    time to empty: 1.1 hours\n    percentage: 47%\n'
+        with patch.object(glance, 'command', side_effect=['/org/freedesktop/UPower/devices/battery_BAT0\n', info]):
+            self.assertEqual(glance.battery(), (47, 'discharging', '1.1 hours'))
+
     def test_small_terminal_and_unknown_values(self):
         data = {'cpu': [('0', 20), ('1', None)], 'memory': None, 'swap': None,
                 'battery': None, 'wifi': None, 'disk': None, 'refreshed': 0}

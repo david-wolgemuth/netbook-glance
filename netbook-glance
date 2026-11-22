@@ -70,7 +70,7 @@ def battery():
         if not info:
             continue
         fields = dict(line.strip().split(':', 1) for line in info.splitlines() if ':' in line)
-        if fields.get('type', '').strip() != 'battery' or fields.get('power supply', '').strip().lower() != 'yes':
+        if fields.get('type', 'battery').strip().lower() != 'battery' or fields.get('power supply', '').strip().lower() != 'yes':
             continue
         if fields.get('present', '').strip().lower() == 'no':
             continue
