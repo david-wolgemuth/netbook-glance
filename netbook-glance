@@ -230,7 +230,7 @@ def lines_for(data, width):
     if data['wifi']:
         name, signal = data['wifi']
         if name == 'disconnected':
-            text_line('Wi-Fi    disconnected')
+            lines.append([('Wi-Fi    ', 0), ('disconnected', 3)])
         else:
             metric('Wi-Fi', 'connected', signal, name, True, 1)
     else:
@@ -253,7 +253,6 @@ def lines_for(data, width):
         metric('Disk', '/', value, f'{size(free)} free')
     else:
         text_line('Disk     unavailable')
-    lines.extend([[], [('r: refresh, q: quit', 0)]])
     return lines
 
 

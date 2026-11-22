@@ -44,8 +44,6 @@ Swap                    [##--------]   23%
 
 
 Disk     /              [#######---]   69%  4.3 GiB free
-
-r: refresh, q: quit
 ```
 
 Per-core CPU bars and RAM/swap bars are inspired by the useful top portion of

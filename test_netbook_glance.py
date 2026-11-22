@@ -57,7 +57,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(battery.index('['), wifi.index('['))
         self.assertEqual(battery.index('['), cpu.index('['))
         self.assertIn('Home', wifi)
-        self.assertIn('r: refresh, q: quit', text)
+        self.assertNotIn('r: refresh, q: quit', text)
         rows = glance.lines_for(data, 80)
         battery_spans = next(row for row in rows if row and row[0][0].startswith('Battery'))
         wifi_spans = next(row for row in rows if row and row[0][0].startswith('Wi-Fi'))
@@ -65,6 +65,13 @@ class CollectorTests(unittest.TestCase):
         self.assertTrue(any('connected' in part and color == 1 for part, color in wifi_spans))
         self.assertEqual(glance.battery_status_color('discharging', 10), 3)
         self.assertEqual(glance.battery_status_color('charging', 10), 1)
+
+    def test_disconnected_wifi_is_red(self):
+        data = {'cpu': [], 'memory': None, 'swap': None, 'battery': None,
+                'wifi': ('disconnected', None), 'disk': None, 'refreshed': 0}
+        rows = glance.lines_for(data, 80)
+        wifi = next(row for row in rows if row and row[0][0].startswith('Wi-Fi'))
+        self.assertIn(('disconnected', 3), wifi)
 
     def test_priority_and_signal_bar(self):
         data = {'cpu': [('0', 20)], 'memory': 40, 'swap': 0,
