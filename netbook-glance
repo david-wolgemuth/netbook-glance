@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""A small, manually refreshed Linux laptop dashboard."""
+import curses
+import datetime
+import os
+import shutil
+import socket
+import subprocess
+import time
+
+
+def read_cpu():
+    counters = {}
+    with open('/proc/stat', encoding='utf-8') as source:
+        for line in source:
+            fields = line.split()
+            if fields and fields[0].startswith('cpu') and fields[0][3:].isdigit():
+                values = [int(n) for n in fields[1:9]]
+                if len(values) >= 4:
+                    counters[fields[0][3:]] = (sum(values), values[3] + (values[4] if len(values) > 4 else 0))
+    return counters
+
+
+def cpu_percent(before, after):
+    result = []
+    for core in sorted(after, key=int):
+        if core not in before:
+            result.append((core, None))
+            continue
+        total = after[core][0] - before[core][0]
+        idle = after[core][1] - before[core][1]
+        result.append((core, max(0, min(100, 100 * (total - idle) / total)) if total > 0 and idle >= 0 else None))
+    return result
+
+
+def memory_values(text):
+    values = {}
+    for line in text.splitlines():
+        key, sep, rest = line.partition(':')
+        if sep:
+            try:
+                values[key] = int(rest.split()[0])
+            except (ValueError, IndexError):
+                pass
+    def used(total, available):
+        return max(0, min(100, 100 * (total - available) / total)) if total else None
+    total = values.get('MemTotal', 0)
+    available = values.get('MemAvailable')
+    swap = values.get('SwapTotal', 0)
+    return (used(total, available) if available is not None else None,
+            used(swap, values.get('SwapFree', 0)) if 'SwapFree' in values else None)
+
+
+def command(*args):
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=3, check=False)
+        return result.stdout if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def battery():
+    devices = command('upower', '-e')
+    if devices is None:
+        return None
+    for device in devices.splitlines():
+        if 'battery' not in device.lower():
+            continue
+        info = command('upower', '-i', device)
+        if not info:
+            continue
+        fields = dict(line.strip().split(':', 1) for line in info.splitlines() if ':' in line)
+        if fields.get('type', '').strip() != 'battery' or fields.get('power supply', '').strip().lower() != 'yes':
+            continue
+        if fields.get('present', '').strip().lower() == 'no':
+            continue
+        try:
+            percent = float(fields.get('percentage', '').strip().rstrip('%'))
+        except ValueError:
+            percent = None
+        state = fields.get('state', 'unknown').strip()
+        estimate = fields.get('time to empty', fields.get('time to full', '')).strip()
+        return percent, state, estimate
+    return None
+
+
+def split_nmcli(line):
+    parts, current, escaped = [], [], False
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == '\\':
+            escaped = True
+        elif char == ':':
+            parts.append(''.join(current))
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append('\\')
+    return parts + [''.join(current)]
+
+
+def wifi():
+    output = command('nmcli', '-t', '--escape', 'yes', '-f', 'IN-USE,SSID,SIGNAL', 'device', 'wifi', 'list', '--rescan', 'no')
+    if output is None:
+        return None
+    for line in output.splitlines():
+        fields = split_nmcli(line)
+        if len(fields) >= 3 and fields[0] == '*':
+            try:
+                signal = int(fields[2])
+            except ValueError:
+                signal = None
+            return fields[1] or '(hidden network)', signal
+    return ('disconnected', None)
+
+
+def collect():
+    try:
+        first = read_cpu()
+        time.sleep(0.5)
+        cores = cpu_percent(first, read_cpu())
+    except (OSError, ValueError):
+        cores = []
+    try:
+        with open('/proc/meminfo', encoding='utf-8') as source:
+            memory, swap = memory_values(source.read())
+    except OSError:
+        memory, swap = None, None
+    try:
+        disk = shutil.disk_usage('/')
+        disk_data = (100 * disk.used / (disk.used + disk.free), disk.free) if disk.used + disk.free else None
+    except OSError:
+        disk_data = None
+    battery_data, wifi_data = battery(), wifi()
+    return {'cpu': cores, 'memory': memory, 'swap': swap, 'battery': battery_data,
+            'wifi': wifi_data, 'disk': disk_data, 'refreshed': time.monotonic()}
+
+
+def percent(value):
+    return '  n/a' if value is None else f'{value:4.0f}%'
+
+
+def bar(value, width=10):
+    if value is None:
+        return '[' + '?' * width + ']'
+    filled = round(max(0, min(100, value)) * width / 100)
+    return '[' + '#' * filled + '-' * (width - filled) + ']'
+
+
+def size(value):
+    for unit in ('B', 'KiB', 'MiB', 'GiB', 'TiB'):
+        if value < 1024 or unit == 'TiB':
+            return f'{value:.1f} {unit}'
+        value /= 1024
+
+
+def age_text(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f'{seconds}s'
+    if seconds < 3600:
+        return f'{seconds // 60}m {seconds % 60:02d}s'
+    return f'{seconds // 3600}h {(seconds % 3600) // 60:02d}m'
+
+
+def header(data):
+    now = datetime.datetime.now().strftime('%a %d %b %Y  %H:%M:%S')
+    age = age_text(time.monotonic() - data['refreshed'])
+    return [f'{socket.gethostname()}  {now}', f'Refreshed {age} ago   r refresh  q quit']
+
+
+def lines_for(data, width):
+    lines = [(line, None) for line in header(data)] + [('', None)]
+    cores = data['cpu']
+    if not cores:
+        lines.append(('CPU     unavailable', None))
+    else:
+        parts = [(f'{core} {bar(value)} {percent(value)}', value) for core, value in cores[:8]]
+        # Pair cores only when the terminal fits them comfortably.
+        if width >= 52:
+            for i in range(0, len(parts), 2):
+                label = 'CPU ' if i == 0 else '    '
+                pair = '    '.join(part[0] for part in parts[i:i + 2])
+                lines.append((label + pair, None))
+        else:
+            for i, (part, value) in enumerate(parts):
+                lines.append((('CPU ' if i == 0 else '    ') + part, value))
+        if len(cores) > 8:
+            lines.append((f'    ... {len(cores) - 8} more cores', None))
+    lines.append((f"RAM     {bar(data['memory'])} {percent(data['memory'])}", data['memory']))
+    lines.append((f"Swap    {bar(data['swap'])} {percent(data['swap'])}", data['swap']))
+    lines.append(('', None))
+    if data['battery']:
+        value, state, estimate = data['battery']
+        lines.append((f'Battery {bar(value)} {percent(value)}  {state}' + (f'  {estimate}' if estimate else ''), None))
+    else:
+        lines.append(('Battery unavailable', None))
+    if data['wifi']:
+        name, signal = data['wifi']
+        lines.append((f'Wi-Fi   {name}' + (f'  signal {signal}%' if signal is not None else ''), None))
+    else:
+        lines.append(('Wi-Fi   unavailable', None))
+    if data['disk']:
+        value, free = data['disk']
+        lines.append((f'Disk /  {bar(value)} {percent(value)}  {size(free)} free', value))
+    else:
+        lines.append(('Disk /  unavailable', None))
+    return lines
+
+
+def draw(screen, data):
+    screen.erase()
+    height, width = screen.getmaxyx()
+    for row, (line, value) in enumerate(lines_for(data, width)):
+        if row >= height:
+            break
+        attr = 0
+        if curses.has_colors() and value is not None:
+            attr = curses.color_pair(3 if value >= 90 else 2 if value >= 70 else 1)
+        try:
+            screen.addnstr(row, 0, line, max(0, width - 1), attr)
+        except curses.error:
+            pass
+    screen.refresh()
+
+
+def draw_header(screen, data):
+    height, width = screen.getmaxyx()
+    for row, line in enumerate(header(data)):
+        if row >= height:
+            break
+        try:
+            screen.move(row, 0)
+            screen.clrtoeol()
+            screen.addnstr(row, 0, line, max(0, width - 1))
+        except curses.error:
+            pass
+    screen.refresh()
+
+
+def main(screen):
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+    if curses.has_colors():
+        curses.start_color()
+        try:
+            curses.use_default_colors()
+            background = -1
+        except curses.error:
+            background = curses.COLOR_BLACK
+        for number, color in enumerate((curses.COLOR_GREEN, curses.COLOR_YELLOW, curses.COLOR_RED), 1):
+            curses.init_pair(number, color, background)
+    def refresh():
+        screen.erase()
+        try:
+            screen.addnstr(0, 0, 'Refreshing...', max(0, screen.getmaxyx()[1] - 1))
+        except curses.error:
+            pass
+        screen.refresh()
+        return collect()
+    data = refresh()
+    draw(screen, data)
+    screen.timeout(1000)
+    while True:
+        key = screen.getch()
+        if key in (ord('q'), ord('Q')):
+            break
+        if key in (ord('r'), ord('R')):
+            data = refresh()
+            draw(screen, data)
+        elif key == curses.KEY_RESIZE:
+            draw(screen, data)
+        elif key == -1:
+            draw_header(screen, data)
+
+
+if __name__ == '__main__':
+    curses.wrapper(main)
