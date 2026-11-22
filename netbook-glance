@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import time
+import textwrap
 
 
 def read_cpu():
@@ -166,10 +167,14 @@ def age_text(seconds):
     return f'{seconds // 3600}h {(seconds % 3600) // 60:02d}m'
 
 
-def header(data):
-    now = datetime.datetime.now().strftime('%a %d %b %Y  %H:%M:%S')
-    age = age_text(time.monotonic() - data['refreshed'])
-    return [f'{socket.gethostname()}  {now}', f'Refreshed {age} ago   r refresh  q quit']
+def header(data, width):
+    now = datetime.datetime.now()
+    age = f"(refreshed: {age_text(time.monotonic() - data['refreshed'])} ago)"
+    date = now.strftime('%A, %d %b %Y  %H:%M:%S')
+    if width >= 70:
+        return [socket.gethostname(), date + '  ' + age]
+    short = now.strftime('%a %d %b %Y  %H:%M:%S')
+    return [socket.gethostname(), short, age]
 
 
 def metric_color(value, higher_is_good=False):
@@ -182,46 +187,61 @@ def metric_color(value, higher_is_good=False):
 
 def lines_for(data, width):
     # Each line is a list of (text, color-pair) spans.
-    lines = [[(line, 0)] for line in header(data)] + [[]]
-    def metric(prefix, value, suffix='', higher_is_good=False):
+    lines = [[(line, 0)] for line in header(data, width)] + [[]]
+    wide = width >= 53
+    def text_line(text):
+        lines.append([(text, 0)])
+    def metric(label, status, value, detail='', higher_is_good=False):
+        # Keep labels and status visible even when the pane is narrow.
+        prefix = f'{label:<9}{status:<14}' if wide else f'{label:<8}{status:<12}'
+        reading = f'{bar(value)} {percent(value)}'
         color = metric_color(value, higher_is_good)
-        return [(prefix, 0), (f'{bar(value)} {percent(value)}', color), (suffix, 0)]
-    def add_metric(prefix, value, suffix='', higher_is_good=False):
-        if suffix and len(prefix) + len(bar(value)) + 1 + len(percent(value)) + len(suffix) >= width:
-            lines.append(metric(prefix, value, higher_is_good=higher_is_good))
-            lines.append([('  ' + suffix.strip(), 0)])
-        else:
-            lines.append(metric(prefix, value, suffix, higher_is_good))
+        if len(prefix) + len(reading) >= width:
+            text_line((label + '  ' + status).rstrip())
+            prefix = '  '
+        spans = [(prefix, 0), (reading, color)]
+        available = width - 1 - len(prefix) - len(reading)
+        if detail and len(detail) + 2 <= available:
+            spans.append(('  ' + detail, 0))
+            detail = ''
+        lines.append(spans)
+        if detail:
+            for part in textwrap.wrap(detail, width=max(1, width - 3), break_long_words=True, replace_whitespace=True):
+                text_line('  ' + part)
 
     if data['battery']:
         value, state, estimate = data['battery']
-        lines.append([('Battery  ', 0), (state, 0)])
-        add_metric('  ', value, f'  {estimate}' if estimate else '', True)
+        metric('Battery', state, value, estimate, True)
     else:
-        lines.append([('Battery  unavailable', 0)])
+        text_line('Battery  unavailable')
+    lines.append([])
     if data['wifi']:
         name, signal = data['wifi']
-        lines.append([('Wi-Fi    ', 0), (name, 0)])
-        if name != 'disconnected':
-            lines.append(metric('  ', signal, higher_is_good=True))
+        if name == 'disconnected':
+            text_line('Wi-Fi    disconnected')
+        else:
+            metric('Wi-Fi', 'connected', signal, name, True)
     else:
-        lines.append([('Wi-Fi    unavailable', 0)])
-    lines.append([])
+        text_line('Wi-Fi    unavailable')
+    lines.extend([[], []])
     cores = data['cpu']
     if not cores:
-        lines.append([('CPU     unavailable', 0)])
+        text_line('CPU      unavailable')
     else:
         for i, (core, value) in enumerate(cores[:8]):
-            lines.append(metric(('CPU ' if i == 0 else '    ') + f'{core} ', value))
+            metric('CPU' if i == 0 else '', core, value)
         if len(cores) > 8:
-            lines.append([(f'    ... {len(cores) - 8} more cores', 0)])
-    lines.append(metric('RAM     ', data['memory']))
-    lines.append(metric('Swap    ', data['swap']))
+            text_line(f'         ... {len(cores) - 8} more cores')
+    lines.append([])
+    metric('RAM', '', data['memory'])
+    metric('Swap', '', data['swap'])
+    lines.extend([[], []])
     if data['disk']:
         value, free = data['disk']
-        add_metric('Disk /  ', value, f'  {size(free)} free')
+        metric('Disk', '/', value, f'{size(free)} free')
     else:
-        lines.append([('Disk /  unavailable', 0)])
+        text_line('Disk     unavailable')
+    lines.extend([[], [('r: refresh, q: quit', 0)]])
     return lines
 
 
@@ -248,7 +268,7 @@ def draw(screen, data):
 
 def draw_header(screen, data):
     height, width = screen.getmaxyx()
-    for row, line in enumerate(header(data)):
+    for row, line in enumerate(header(data, width)):
         if row >= height:
             break
         try:

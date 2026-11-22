@@ -44,7 +44,20 @@ class CollectorTests(unittest.TestCase):
         lines = glance.lines_for(data, 30)
         text = [''.join(part for part, _ in line) for line in lines]
         self.assertTrue(any('unavailable' in line for line in text))
-        self.assertTrue(any('1 [' in line for line in text))
+        self.assertTrue(any(line.strip() == '1' for line in text))
+
+    def test_wide_columns_and_controls(self):
+        data = {'cpu': [('0', 4), ('1', 12)], 'memory': 62, 'swap': 26,
+                'battery': (38, 'discharging', '3 hours'), 'wifi': ('Home', 68),
+                'disk': (73, 3.5 * 1024**3), 'refreshed': 0}
+        text = [''.join(part for part, _ in line) for line in glance.lines_for(data, 80)]
+        battery = next(line for line in text if line.startswith('Battery'))
+        wifi = next(line for line in text if line.startswith('Wi-Fi'))
+        cpu = next(line for line in text if line.startswith('CPU'))
+        self.assertEqual(battery.index('['), wifi.index('['))
+        self.assertEqual(battery.index('['), cpu.index('['))
+        self.assertIn('Home', wifi)
+        self.assertIn('r: refresh, q: quit', text)
 
     def test_priority_and_signal_bar(self):
         data = {'cpu': [('0', 20)], 'memory': 40, 'swap': 0,

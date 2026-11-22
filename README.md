@@ -28,19 +28,24 @@ Press `r` to refresh and `q` to quit. The clock and refresh age update once per 
 Layout is illustrative, not a fixed specification:
 
 ```text
-netbook-glance  Sun 22 Nov 2026  09:42:00
-Refreshed 12s ago   r refresh  q quit
+netbook-glance
+Sunday, 22 Nov 2026  09:42:00  (refreshed: 12s ago)
 
-Battery  discharging
-  [#######---]   72%  3.2 hours
-Wi-Fi    MyNetwork
-  [########--]   78%
+Battery  discharging    [#######---]   72%  3.2 hours
 
-CPU 0 [#---------]   13%
-    1 [##--------]   16%
-RAM     [####------]   41%
-Swap    [##--------]   23%
-Disk /  [#######---]   69%  4.3 GiB free
+Wi-Fi    connected      [########--]   78%  MyNetwork
+
+
+CPU      0              [#---------]   13%
+         1              [##--------]   16%
+
+RAM                     [####------]   41%
+Swap                    [##--------]   23%
+
+
+Disk     /              [#######---]   69%  4.3 GiB free
+
+r: refresh, q: quit
 ```
 
 Per-core CPU bars and RAM/swap bars are inspired by the useful top portion of
