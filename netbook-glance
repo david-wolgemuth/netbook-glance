@@ -185,21 +185,33 @@ def metric_color(value, higher_is_good=False):
     return 3 if value >= 90 else 2 if value >= 70 else 1
 
 
+def battery_status_color(state, value):
+    if state == 'discharging':
+        return 3 if value is not None and value <= 20 else 2
+    if state in ('charging', 'fully-charged'):
+        return 1
+    return 0
+
+
 def lines_for(data, width):
     # Each line is a list of (text, color-pair) spans.
     lines = [[(line, 0)] for line in header(data, width)] + [[]]
     wide = width >= 53
     def text_line(text):
         lines.append([(text, 0)])
-    def metric(label, status, value, detail='', higher_is_good=False):
+    def metric(label, status, value, detail='', higher_is_good=False, status_color=0):
         # Keep labels and status visible even when the pane is narrow.
-        prefix = f'{label:<9}{status:<14}' if wide else f'{label:<8}{status:<12}'
+        label_part = f'{label:<9}' if wide else f'{label:<8}'
+        status_part = f'{status:<14}' if wide else f'{status:<12}'
+        prefix = label_part + status_part
         reading = f'{bar(value)} {percent(value)}'
         color = metric_color(value, higher_is_good)
         if len(prefix) + len(reading) >= width:
-            text_line((label + '  ' + status).rstrip())
+            lines.append([(label + '  ', 0), (status, status_color)])
             prefix = '  '
-        spans = [(prefix, 0), (reading, color)]
+            spans = [(prefix, 0), (reading, color)]
+        else:
+            spans = [(label_part, 0), (status_part, status_color), (reading, color)]
         available = width - 1 - len(prefix) - len(reading)
         if detail and len(detail) + 2 <= available:
             spans.append(('  ' + detail, 0))
@@ -211,7 +223,7 @@ def lines_for(data, width):
 
     if data['battery']:
         value, state, estimate = data['battery']
-        metric('Battery', state, value, estimate, True)
+        metric('Battery', state, value, estimate, True, battery_status_color(state, value))
     else:
         text_line('Battery  unavailable')
     lines.append([])
@@ -220,7 +232,7 @@ def lines_for(data, width):
         if name == 'disconnected':
             text_line('Wi-Fi    disconnected')
         else:
-            metric('Wi-Fi', 'connected', signal, name, True)
+            metric('Wi-Fi', 'connected', signal, name, True, 1)
     else:
         text_line('Wi-Fi    unavailable')
     lines.extend([[], []])

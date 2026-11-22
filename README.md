@@ -51,8 +51,9 @@ r: refresh, q: quit
 Per-core CPU bars and RAM/swap bars are inspired by the useful top portion of
 htop. Prioritize percentages; include free disk space and battery time when
 available. Bars and percentages use green/yellow/red according to their meaning: low
-battery or Wi-Fi signal and high resource use are highlighted. Labels and
-details remain neutral, and numeric values make color optional. Charging/discharging,
+battery or Wi-Fi signal and high resource use are highlighted. Battery and
+connection statuses are colored too; labels and details remain neutral.
+Numeric values and status words make color optional. Charging/discharging,
 unknown time, disconnected Wi-Fi, unavailable swap, missing sensors, and
 terminal resize should be handled gracefully. An unavailable measurement must
 not prevent the rest of the screen from working. Adapt to narrow terminals and

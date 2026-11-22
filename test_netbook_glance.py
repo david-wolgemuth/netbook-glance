@@ -58,6 +58,13 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(battery.index('['), cpu.index('['))
         self.assertIn('Home', wifi)
         self.assertIn('r: refresh, q: quit', text)
+        rows = glance.lines_for(data, 80)
+        battery_spans = next(row for row in rows if row and row[0][0].startswith('Battery'))
+        wifi_spans = next(row for row in rows if row and row[0][0].startswith('Wi-Fi'))
+        self.assertTrue(any('discharging' in part and color == 2 for part, color in battery_spans))
+        self.assertTrue(any('connected' in part and color == 1 for part, color in wifi_spans))
+        self.assertEqual(glance.battery_status_color('discharging', 10), 3)
+        self.assertEqual(glance.battery_status_color('charging', 10), 1)
 
     def test_priority_and_signal_bar(self):
         data = {'cpu': [('0', 20)], 'memory': 40, 'swap': 0,
