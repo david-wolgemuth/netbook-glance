@@ -42,8 +42,23 @@ class CollectorTests(unittest.TestCase):
         data = {'cpu': [('0', 20), ('1', None)], 'memory': None, 'swap': None,
                 'battery': None, 'wifi': None, 'disk': None, 'refreshed': 0}
         lines = glance.lines_for(data, 30)
-        self.assertTrue(any('unavailable' in line for line, _ in lines))
-        self.assertTrue(any('1 [' in line for line, _ in lines))
+        text = [''.join(part for part, _ in line) for line in lines]
+        self.assertTrue(any('unavailable' in line for line in text))
+        self.assertTrue(any('1 [' in line for line in text))
+
+    def test_priority_and_signal_bar(self):
+        data = {'cpu': [('0', 20)], 'memory': 40, 'swap': 0,
+                'battery': (10, 'discharging', '1 hour'), 'wifi': ('Home', 80),
+                'disk': (75, 1024**3), 'refreshed': 0}
+        lines = glance.lines_for(data, 35)
+        text = [''.join(part for part, _ in line) for line in lines]
+        self.assertLess(next(i for i, line in enumerate(text) if 'Battery' in line), next(i for i, line in enumerate(text) if 'Wi-Fi' in line))
+        self.assertLess(next(i for i, line in enumerate(text) if 'Wi-Fi' in line), next(i for i, line in enumerate(text) if 'CPU' in line))
+        self.assertTrue(any('[########--]' in line for line in text))
+        self.assertEqual(glance.metric_color(10, True), 3)
+        self.assertEqual(glance.metric_color(80, True), 1)
+        self.assertEqual(glance.metric_color(90), 3)
+        self.assertTrue(any('1.0 GiB free' in line for line in text))
 
     def test_refresh_age(self):
         self.assertEqual(glance.age_text(59), '59s')

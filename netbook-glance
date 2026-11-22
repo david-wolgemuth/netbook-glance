@@ -172,58 +172,77 @@ def header(data):
     return [f'{socket.gethostname()}  {now}', f'Refreshed {age} ago   r refresh  q quit']
 
 
+def metric_color(value, higher_is_good=False):
+    if value is None:
+        return 0
+    if higher_is_good:
+        return 3 if value <= 20 else 2 if value <= 40 else 1
+    return 3 if value >= 90 else 2 if value >= 70 else 1
+
+
 def lines_for(data, width):
-    lines = [(line, None) for line in header(data)] + [('', None)]
-    cores = data['cpu']
-    if not cores:
-        lines.append(('CPU     unavailable', None))
-    else:
-        parts = [(f'{core} {bar(value)} {percent(value)}', value) for core, value in cores[:8]]
-        # Pair cores only when the terminal fits them comfortably.
-        if width >= 52:
-            for i in range(0, len(parts), 2):
-                label = 'CPU ' if i == 0 else '    '
-                pair = '    '.join(part[0] for part in parts[i:i + 2])
-                lines.append((label + pair, None))
+    # Each line is a list of (text, color-pair) spans.
+    lines = [[(line, 0)] for line in header(data)] + [[]]
+    def metric(prefix, value, suffix='', higher_is_good=False):
+        color = metric_color(value, higher_is_good)
+        return [(prefix, 0), (f'{bar(value)} {percent(value)}', color), (suffix, 0)]
+    def add_metric(prefix, value, suffix='', higher_is_good=False):
+        if suffix and len(prefix) + len(bar(value)) + 1 + len(percent(value)) + len(suffix) >= width:
+            lines.append(metric(prefix, value, higher_is_good=higher_is_good))
+            lines.append([('  ' + suffix.strip(), 0)])
         else:
-            for i, (part, value) in enumerate(parts):
-                lines.append((('CPU ' if i == 0 else '    ') + part, value))
-        if len(cores) > 8:
-            lines.append((f'    ... {len(cores) - 8} more cores', None))
-    lines.append((f"RAM     {bar(data['memory'])} {percent(data['memory'])}", data['memory']))
-    lines.append((f"Swap    {bar(data['swap'])} {percent(data['swap'])}", data['swap']))
-    lines.append(('', None))
+            lines.append(metric(prefix, value, suffix, higher_is_good))
+
     if data['battery']:
         value, state, estimate = data['battery']
-        lines.append((f'Battery {bar(value)} {percent(value)}  {state}' + (f'  {estimate}' if estimate else ''), None))
+        lines.append([('Battery  ', 0), (state, 0)])
+        add_metric('  ', value, f'  {estimate}' if estimate else '', True)
     else:
-        lines.append(('Battery unavailable', None))
+        lines.append([('Battery  unavailable', 0)])
     if data['wifi']:
         name, signal = data['wifi']
-        lines.append((f'Wi-Fi   {name}' + (f'  signal {signal}%' if signal is not None else ''), None))
+        lines.append([('Wi-Fi    ', 0), (name, 0)])
+        if name != 'disconnected':
+            lines.append(metric('  ', signal, higher_is_good=True))
     else:
-        lines.append(('Wi-Fi   unavailable', None))
+        lines.append([('Wi-Fi    unavailable', 0)])
+    lines.append([])
+    cores = data['cpu']
+    if not cores:
+        lines.append([('CPU     unavailable', 0)])
+    else:
+        for i, (core, value) in enumerate(cores[:8]):
+            lines.append(metric(('CPU ' if i == 0 else '    ') + f'{core} ', value))
+        if len(cores) > 8:
+            lines.append([(f'    ... {len(cores) - 8} more cores', 0)])
+    lines.append(metric('RAM     ', data['memory']))
+    lines.append(metric('Swap    ', data['swap']))
     if data['disk']:
         value, free = data['disk']
-        lines.append((f'Disk /  {bar(value)} {percent(value)}  {size(free)} free', value))
+        add_metric('Disk /  ', value, f'  {size(free)} free')
     else:
-        lines.append(('Disk /  unavailable', None))
+        lines.append([('Disk /  unavailable', 0)])
     return lines
 
 
 def draw(screen, data):
     screen.erase()
     height, width = screen.getmaxyx()
-    for row, (line, value) in enumerate(lines_for(data, width)):
+    for row, spans in enumerate(lines_for(data, width)):
         if row >= height:
             break
-        attr = 0
-        if curses.has_colors() and value is not None:
-            attr = curses.color_pair(3 if value >= 90 else 2 if value >= 70 else 1)
-        try:
-            screen.addnstr(row, 0, line, max(0, width - 1), attr)
-        except curses.error:
-            pass
+        col = 0
+        for text, color in spans:
+            remaining = width - 1 - col
+            if remaining <= 0:
+                break
+            text = text[:remaining]
+            attr = curses.color_pair(color) if color and curses.has_colors() else 0
+            try:
+                screen.addnstr(row, col, text, remaining, attr)
+            except curses.error:
+                pass
+            col += len(text)
     screen.refresh()
 
 

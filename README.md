@@ -31,19 +31,23 @@ Layout is illustrative, not a fixed specification:
 netbook-glance  Sun 22 Nov 2026  09:42:00
 Refreshed 12s ago   r refresh  q quit
 
-CPU  0 [███░░░░░░░]  13%    1 [███░░░░░░░]  16%
-     2 [███░░░░░░░]  13%    3 [█░░░░░░░░░]   6%
-RAM    [████░░░░░░]  41%    Swap [██░░░░░░░░] 23%
+Battery  discharging
+  [#######---]   72%  3.2 hours
+Wi-Fi    MyNetwork
+  [########--]   78%
 
-Battery [███████░░░] 72%    discharging · ~3h 20m
-Wi-Fi   MyNetwork             signal 78%
-Disk /  [███████░░░] 69%    4.3 GB free
+CPU 0 [#---------]   13%
+    1 [##--------]   16%
+RAM     [####------]   41%
+Swap    [##--------]   23%
+Disk /  [#######---]   69%  4.3 GiB free
 ```
 
 Per-core CPU bars and RAM/swap bars are inspired by the useful top portion of
 htop. Prioritize percentages; include free disk space and battery time when
-available. Use meaningful colors (for example green/yellow/red), but always
-show labels and numeric values so color is not required. Charging/discharging,
+available. Bars and percentages use green/yellow/red according to their meaning: low
+battery or Wi-Fi signal and high resource use are highlighted. Labels and
+details remain neutral, and numeric values make color optional. Charging/discharging,
 unknown time, disconnected Wi-Fi, unavailable swap, missing sensors, and
 terminal resize should be handled gracefully. An unavailable measurement must
 not prevent the rest of the screen from working. Adapt to narrow terminals and
