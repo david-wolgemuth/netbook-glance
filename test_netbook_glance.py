@@ -14,6 +14,17 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(glance.cpu_percent({'0': (100, 40)}, {'0': (200, 70), '1': (1, 1)}), [('0', 70), ('1', None)])
         self.assertIsNone(glance.cpu_percent({'0': (10, 5)}, {'0': (10, 5)})[0][1])
 
+    def test_cpu_is_reported_before_other_collectors(self):
+        events = []
+        with patch.object(glance, 'read_cpu', side_effect=[{'0': (0, 0)}, {'0': (10, 5)}]), \
+             patch.object(glance.time, 'sleep'), \
+             patch.object(glance, 'battery', side_effect=lambda: events.append('battery')), \
+             patch.object(glance, 'wifi', side_effect=lambda: events.append('wifi')):
+            snapshot = glance.collect(on_cpu=lambda cores: events.append(('cpu', cores)))
+        self.assertEqual(events[0], ('cpu', [('0', 50)]))
+        self.assertEqual(events[1:], ['battery', 'wifi'])
+        self.assertEqual(snapshot['cpu'], [('0', 50)])
+
     def test_available_memory_and_no_swap(self):
         self.assertEqual(glance.memory_values('MemTotal: 100 kB\nMemAvailable: 60 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB'), (40, None))
         self.assertEqual(glance.memory_values('MemTotal: 100 kB'), (None, None))
@@ -91,6 +102,12 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(glance.age_text(59), '59s')
         self.assertEqual(glance.age_text(61), '1m 01s')
         self.assertEqual(glance.age_text(3600), '1h 00m')
+        for elapsed, expected in [(59, 0), (60, 2), (599, 2), (600, 3)]:
+            with patch.object(glance.time, 'monotonic', return_value=1000):
+                data = {'refreshed': 1000 - elapsed}
+                for width in (40, 80):
+                    spans = [span for row in glance.header(data, width) for span in row]
+                    self.assertEqual(next(color for text, color in spans if 'refreshed:' in text), expected)
 
 
 if __name__ == '__main__':

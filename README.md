@@ -8,6 +8,10 @@ assuming identical hardware.
 
 **Status: minimal working version.** Run `./netbook-glance` in a terminal.
 Press `r` to refresh and `q` to quit. The clock and refresh age update once per second; system measurements are collected only on request.
+The refresh age turns yellow after one minute and red after ten minutes.
+On manual refresh, CPU readings appear first; other values update when their
+collection completes. CPU is a short sample and can show brief spikes from any
+process running during that interval.
 
 ## Goals
 

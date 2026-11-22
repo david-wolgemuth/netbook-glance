@@ -118,13 +118,15 @@ def wifi():
     return ('disconnected', None)
 
 
-def collect():
+def collect(on_cpu=None):
     try:
         first = read_cpu()
         time.sleep(0.5)
         cores = cpu_percent(first, read_cpu())
     except (OSError, ValueError):
         cores = []
+    if on_cpu is not None:
+        on_cpu(cores)
     try:
         with open('/proc/meminfo', encoding='utf-8') as source:
             memory, swap = memory_values(source.read())
@@ -169,12 +171,14 @@ def age_text(seconds):
 
 def header(data, width):
     now = datetime.datetime.now()
-    age = f"(refreshed: {age_text(time.monotonic() - data['refreshed'])} ago)"
+    elapsed = max(0, time.monotonic() - data['refreshed'])
+    age = f"(refreshed: {age_text(elapsed)} ago)"
+    color = 3 if elapsed >= 600 else 2 if elapsed >= 60 else 0
     date = now.strftime('%A, %d %b %Y  %H:%M:%S')
     if width >= 70:
-        return [socket.gethostname(), date + '  ' + age]
+        return [[(socket.gethostname(), 0)], [(date + '  ', 0), (age, color)]]
     short = now.strftime('%a %d %b %Y  %H:%M:%S')
-    return [socket.gethostname(), short, age]
+    return [[(socket.gethostname(), 0)], [(short, 0)], [(age, color)]]
 
 
 def metric_color(value, higher_is_good=False):
@@ -195,7 +199,7 @@ def battery_status_color(state, value):
 
 def lines_for(data, width):
     # Each line is a list of (text, color-pair) spans.
-    lines = [[(line, 0)] for line in header(data, width)] + [[]]
+    lines = header(data, width) + [[]]
     wide = width >= 53
     def text_line(text):
         lines.append([(text, 0)])
@@ -279,13 +283,20 @@ def draw(screen, data):
 
 def draw_header(screen, data):
     height, width = screen.getmaxyx()
-    for row, line in enumerate(header(data, width)):
+    for row, spans in enumerate(header(data, width)):
         if row >= height:
             break
         try:
             screen.move(row, 0)
             screen.clrtoeol()
-            screen.addnstr(row, 0, line, max(0, width - 1))
+            col = 0
+            for text, color in spans:
+                remaining = width - 1 - col
+                if remaining <= 0:
+                    break
+                attr = curses.color_pair(color) if color and curses.has_colors() else 0
+                screen.addnstr(row, col, text, remaining, attr)
+                col += min(len(text), remaining)
         except curses.error:
             pass
     screen.refresh()
@@ -305,14 +316,19 @@ def main(screen):
             background = curses.COLOR_BLACK
         for number, color in enumerate((curses.COLOR_GREEN, curses.COLOR_YELLOW, curses.COLOR_RED), 1):
             curses.init_pair(number, color, background)
-    def refresh():
-        screen.erase()
-        try:
-            screen.addnstr(0, 0, 'Refreshing...', max(0, screen.getmaxyx()[1] - 1))
-        except curses.error:
-            pass
-        screen.refresh()
-        return collect()
+    def refresh(previous=None):
+        if previous is None:
+            screen.erase()
+            try:
+                screen.addnstr(0, 0, 'Refreshing...', max(0, screen.getmaxyx()[1] - 1))
+            except curses.error:
+                pass
+            screen.refresh()
+            return collect()
+        def show_cpu(cores):
+            partial = dict(previous, cpu=cores)
+            draw(screen, partial)
+        return collect(on_cpu=show_cpu)
     data = refresh()
     draw(screen, data)
     screen.timeout(1000)
@@ -321,7 +337,7 @@ def main(screen):
         if key in (ord('q'), ord('Q')):
             break
         if key in (ord('r'), ord('R')):
-            data = refresh()
+            data = refresh(data)
             draw(screen, data)
         elif key == curses.KEY_RESIZE:
             draw(screen, data)
